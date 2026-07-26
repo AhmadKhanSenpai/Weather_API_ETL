@@ -30,14 +30,10 @@ def parameter_builder(file_path):
         yield row["site_code"], params
 
 
-def 
-
-
-
 # testing
 if __name__ == "__main__":
     result = parameter_builder("meta_data.csv")
     for i, param in enumerate(result):
-        print(i, param)
-        if i > 10:
+        if i > 0:
             break
+        print(i, param)
