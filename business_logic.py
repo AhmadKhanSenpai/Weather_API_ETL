@@ -6,6 +6,7 @@ import openmeteo_requests
 import pandas as pd
 import requests_cache
 import database as db
+import time
 
 # retries and backoff factors can handle errors
 cache_session = requests_cache.CachedSession(".cache", expire_after=3600)
@@ -52,7 +53,7 @@ def parameter_builder(file_path):
             "end_date": end_date,
         }
 
-        yield row["site_code"], params
+        return row["site_code"], params
 
 
 def fetch_weather_data(site_code, params):
@@ -63,10 +64,6 @@ def fetch_weather_data(site_code, params):
     # parsing the info from response
     responses = openmeteo.weather_api(url=URL, params=params)
     response = responses[0]
-    print(f"Coordinates: {response.Latitude()}°N {response.Longitude()}°E")
-    print(f"Elevation: {response.Elevation()} m asl")
-    print(f"Timezone difference to GMT+0: {response.UtcOffsetSeconds()}s")
-    print(param[0])
 
     # Process hourly data. The order of variables needs to be the same as requested.
     hourly = response.Hourly()
@@ -95,12 +92,22 @@ def fetch_weather_data(site_code, params):
     return hourly_dataframe
 
 
+def run_weather_etl(path):
+    creating_meta_data(path)
+
+    for site_code, params in parameter_builder(path):
+        df = fetch_weather_data(site_code, params)
+        creating_weather_data(df)
+        time.sleep(1)
+
+
 # testing
 if __name__ == "__main__":
-    creating_meta_data(PATH)
-    result = parameter_builder("meta_data.csv")
-    for i, param in enumerate(result):
-        if i > 0:
-            break
-        df = fetch_weather_data(site_code=param[0], params=param[1])
-        creating_weather_data(df)
+    start_time = time.time()
+    run_weather_etl(path=PATH)
+    end_time = time.time()
+
+    total_time = end_time - start_time
+
+    print(f"Total execution time: {total_time:.2f} seconds")
+    print(f"Total execution time: {total_time/60:.2f} minutes")

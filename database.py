@@ -37,7 +37,6 @@ def create_sites_table():
 def create_weather_table():
     query = """
     CREATE TABLE IF NOT EXISTS weather_hourly (
-        id BIGSERIAL PRIMARY KEY,
         site_code VARCHAR(50) NOT NULL,
         date TIMESTAMPTZ NOT NULL,
         temperature_2m DOUBLE PRECISION,
