@@ -81,3 +81,5 @@ if __name__ == "__main__":
         if i > 0:
             break
         fetch_weather_data(params=param[1])
+
+# just pushing the code again
