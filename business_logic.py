@@ -14,11 +14,23 @@ openmeteo = openmeteo_requests.Client(session=retry_session)
 
 # lets define constant varaibles
 URL = "https://api.open-meteo.com/v1/forecast"
+PATH = "meta_data.csv"
 
 
-# I used the list of dicts first but then i remember why flood memory with a list in case of large data we would need
-# a generator
+def creating_meta_data(path):
+    df = pd.read_csv(path)
+    db.insert_meta_data(df)
+
+
+def creating_weather_data(df):
+    db.insert_weather_data(df)
+
+
 def parameter_builder(file_path):
+    """
+    this function will build the parameter dict
+    and site code
+    """
     df = pd.read_csv(file_path)
 
     # calcualting date based on current date
@@ -43,12 +55,18 @@ def parameter_builder(file_path):
         yield row["site_code"], params
 
 
-def fetch_weather_data(params):
+def fetch_weather_data(site_code, params):
+    # creating necessary table if not exist
+    db.create_sites_table()
+    db.create_weather_table()
+
+    # parsing the info from response
     responses = openmeteo.weather_api(url=URL, params=params)
     response = responses[0]
     print(f"Coordinates: {response.Latitude()}°N {response.Longitude()}°E")
     print(f"Elevation: {response.Elevation()} m asl")
     print(f"Timezone difference to GMT+0: {response.UtcOffsetSeconds()}s")
+    print(param[0])
 
     # Process hourly data. The order of variables needs to be the same as requested.
     hourly = response.Hourly()
@@ -65,6 +83,7 @@ def fetch_weather_data(params):
         )
     }
 
+    hourly_data["site_code"] = site_code
     hourly_data["temperature_2m"] = hourly_temperature_2m
     hourly_data["relative_humidity_2m"] = hourly_relative_humidity_2m
     hourly_data["global_tilted_irradiance_instant"] = (
@@ -72,15 +91,16 @@ def fetch_weather_data(params):
     )
 
     hourly_dataframe = pd.DataFrame(data=hourly_data)
-    hourly_dataframe.to_sql()
+
+    return hourly_dataframe
 
 
 # testing
 if __name__ == "__main__":
+    creating_meta_data(PATH)
     result = parameter_builder("meta_data.csv")
     for i, param in enumerate(result):
         if i > 0:
             break
-        fetch_weather_data(params=param[1])
-
-# just pushing the code again
+        df = fetch_weather_data(site_code=param[0], params=param[1])
+        creating_weather_data(df)
