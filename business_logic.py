@@ -1,18 +1,19 @@
 from datetime import datetime as dt
 from datetime import timedelta as td
 from retry_requests import retry
-from sqlalchemy import engine
 
 import openmeteo_requests
 import pandas as pd
 import requests_cache
+import database as db
 
 # retries and backoff factors can handle errors
 cache_session = requests_cache.CachedSession(".cache", expire_after=3600)
 retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 openmeteo = openmeteo_requests.Client(session=retry_session)
 
-url = "https://api.open-meteo.com/v1/forecast"
+# lets define constant varaibles
+URL = "https://api.open-meteo.com/v1/forecast"
 
 
 # I used the list of dicts first but then i remember why flood memory with a list in case of large data we would need
@@ -43,7 +44,7 @@ def parameter_builder(file_path):
 
 
 def fetch_weather_data(params):
-    responses = openmeteo.weather_api(url, params=params)
+    responses = openmeteo.weather_api(url=URL, params=params)
     response = responses[0]
     print(f"Coordinates: {response.Latitude()}°N {response.Longitude()}°E")
     print(f"Elevation: {response.Elevation()} m asl")
@@ -71,7 +72,7 @@ def fetch_weather_data(params):
     )
 
     hourly_dataframe = pd.DataFrame(data=hourly_data)
-    print("\nHourly data\n", hourly_dataframe)
+    hourly_dataframe.to_sql()
 
 
 # testing
