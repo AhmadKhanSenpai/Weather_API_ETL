@@ -18,7 +18,7 @@ def generate_site_code(existing):
 sites = []
 codes = set()
 
-while len(sites) < 1000:
+while len(sites) < 10000:
     sites.append(
         {
             "site_code": generate_site_code(codes),
