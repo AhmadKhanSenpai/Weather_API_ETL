@@ -102,8 +102,6 @@ def insert_weather_data(df):
     with engine.begin() as conn:
         conn.execute(text(query), data)
 
-    print("Weather data inserted successfully.")
-
 
 if __name__ == "__main__":
     create_sites_table()

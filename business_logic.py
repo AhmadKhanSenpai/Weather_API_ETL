@@ -8,9 +8,9 @@ import requests_cache
 import database as db
 import time
 
-# retries and backoff factors can handle errors
+# cache_session, retries and backoff factors
 cache_session = requests_cache.CachedSession(".cache", expire_after=3600)
-retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+retry_session = retry(cache_session, retries=2, backoff_factor=0.5)
 openmeteo = openmeteo_requests.Client(session=retry_session)
 
 # lets define constant varaibles
@@ -18,12 +18,20 @@ URL = "https://api.open-meteo.com/v1/forecast"
 PATH = "meta_data.csv"
 
 
-def creating_meta_data(path):
+def create_meta_table():
+    db.create_sites_table()
+
+
+def create_weather_data():
+    db.create_weather_table()
+
+
+def insert_meta_data(path):
     df = pd.read_csv(path)
     db.insert_meta_data(df)
 
 
-def creating_weather_data(df):
+def insert_weather_data(df):
     db.insert_weather_data(df)
 
 
@@ -53,61 +61,85 @@ def parameter_builder(file_path):
             "end_date": end_date,
         }
 
-        return row["site_code"], params
+        yield row["site_code"], params
 
 
 def fetch_weather_data(site_code, params):
-    # creating necessary table if not exist
-    db.create_sites_table()
-    db.create_weather_table()
+    attempts = 3
+    for attempt in range(attempts):
+        try:
+            # parsing the info from response
+            responses = openmeteo.weather_api(url=URL, params=params)
+            response = responses[0]
 
-    # parsing the info from response
-    responses = openmeteo.weather_api(url=URL, params=params)
-    response = responses[0]
+            # Process hourly data. The order of variables needs to be the same as requested.
+            hourly = response.Hourly()
+            hourly_temperature_2m = hourly.Variables(0).ValuesAsNumpy()
+            hourly_relative_humidity_2m = hourly.Variables(1).ValuesAsNumpy()
+            hourly_global_tilted_irradiance_instant = hourly.Variables(
+                2
+            ).ValuesAsNumpy()
 
-    # Process hourly data. The order of variables needs to be the same as requested.
-    hourly = response.Hourly()
-    hourly_temperature_2m = hourly.Variables(0).ValuesAsNumpy()
-    hourly_relative_humidity_2m = hourly.Variables(1).ValuesAsNumpy()
-    hourly_global_tilted_irradiance_instant = hourly.Variables(2).ValuesAsNumpy()
+            hourly_data = {
+                "date": pd.date_range(
+                    start=pd.to_datetime(hourly.Time(), unit="s", utc=True),
+                    end=pd.to_datetime(hourly.TimeEnd(), unit="s", utc=True),
+                    freq=pd.Timedelta(seconds=hourly.Interval()),
+                    inclusive="left",
+                )
+            }
 
-    hourly_data = {
-        "date": pd.date_range(
-            start=pd.to_datetime(hourly.Time(), unit="s", utc=True),
-            end=pd.to_datetime(hourly.TimeEnd(), unit="s", utc=True),
-            freq=pd.Timedelta(seconds=hourly.Interval()),
-            inclusive="left",
-        )
-    }
+            hourly_data["site_code"] = site_code
+            hourly_data["temperature_2m"] = hourly_temperature_2m
+            hourly_data["relative_humidity_2m"] = hourly_relative_humidity_2m
+            hourly_data["global_tilted_irradiance_instant"] = (
+                hourly_global_tilted_irradiance_instant
+            )
 
-    hourly_data["site_code"] = site_code
-    hourly_data["temperature_2m"] = hourly_temperature_2m
-    hourly_data["relative_humidity_2m"] = hourly_relative_humidity_2m
-    hourly_data["global_tilted_irradiance_instant"] = (
-        hourly_global_tilted_irradiance_instant
-    )
+            hourly_dataframe = pd.DataFrame(data=hourly_data)
 
-    hourly_dataframe = pd.DataFrame(data=hourly_data)
+            return hourly_dataframe
 
-    return hourly_dataframe
+        except Exception as e:
+            print(f"{site_code} failed")
+            print(f"Attempt {attempt + 1} / {attempts}")
+
+            print(f"reason of faliure {e}")
+
+            # if request failed then retry that request after 5 sec
+            if attempt < attempts - 1:
+                print("retrying after 5 seconds \n")
+                time.sleep(5)
+
+            else:
+                print(f"request still failed after {attempts} attempts")
+                print(f"reason of faliure: {e}")
+                return None
 
 
 def run_weather_etl(path):
-    creating_meta_data(path)
+
+    insert_meta_data(path)
+    count = 0
 
     for site_code, params in parameter_builder(path):
+        count += 1
         df = fetch_weather_data(site_code, params)
-        creating_weather_data(df)
-        time.sleep(1)
+        insert_weather_data(df)
+        print(count)
 
 
 # testing
 if __name__ == "__main__":
+    # just building the schema if it does not exist
+    create_meta_table()
+    create_weather_data()
+
+    # intiating the data extraction
     start_time = time.time()
     run_weather_etl(path=PATH)
     end_time = time.time()
 
     total_time = end_time - start_time
 
-    print(f"Total execution time: {total_time:.2f} seconds")
     print(f"Total execution time: {total_time/60:.2f} minutes")
