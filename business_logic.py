@@ -18,6 +18,13 @@ URL = "https://api.open-meteo.com/v1/forecast"
 PATH = "meta_data.csv"
 
 
+# just a class for raising custom built error
+class APIRateLimitError:
+    "Raised when the Open-Meteo hourly rate limit exceeded"
+
+    pass
+
+
 def create_meta_table():
     db.create_sites_table()
 
@@ -36,32 +43,33 @@ def insert_weather_data(df):
 
 
 def parameter_builder(file_path):
-    """
-    this function will build the parameter dict
-    and site code
-    """
     df = pd.read_csv(file_path)
+
+    # batch_size for each request 1000 is the limit
+    batch_size = 1000
 
     # calcualting date based on current date
     end_date = dt.now().strftime("%Y-%m-%d")
-    diff = dt.now() - td(days=7)
+    diff = (dt.now() + td(days=1)) - td(days=7)
     start_date = diff.strftime("%Y-%m-%d")
 
-    for _, row in df.iterrows():
+    for start_index in range(0, len(df), batch_size):
+
+        # now i have a chunk of dataframe that i can work with upto 1000 rows
+        df_batch = df.iloc[start_index : start_index + batch_size]
+
         params = {
-            "latitude": row["latitude"],
-            "longitude": row["longitude"],
-            "hourly": [
-                "temperature_2m",
-                "relative_humidity_2m",
-                "global_tilted_irradiance_instant",
-            ],
+            "latitude": df_batch["latitude"].tolist(),
+            "longitude": df_batch["longitude"].tolist(),
+            "hourly": ["temperature_2m", "relative_humidity_2m", "shortwave_radiation"],
             "timezone": "auto",
             "start_date": start_date,
             "end_date": end_date,
         }
 
-        yield row["site_code"], params
+        site_codes = df_batch["site_code"].tolist()
+
+        yield site_codes, params
 
 
 def fetch_weather_data(site_code, params):
@@ -101,10 +109,14 @@ def fetch_weather_data(site_code, params):
             return hourly_dataframe
 
         except Exception as e:
+            error_message = str(e)
             print(f"{site_code} failed")
             print(f"Attempt {attempt + 1} / {attempts}")
-
             print(f"reason of faliure {e}")
+
+            # raise error if hourly limit reached
+            if "Hourly API request limit exceeded" in error_message:
+                raise APIRateLimitError("API hourly limit reached")
 
             # if request failed then retry that request after 5 sec
             if attempt < attempts - 1:
@@ -122,11 +134,18 @@ def run_weather_etl(path):
     insert_meta_data(path)
     count = 0
 
-    for site_code, params in parameter_builder(path):
-        count += 1
-        df = fetch_weather_data(site_code, params)
-        insert_weather_data(df)
-        print(count)
+    try:
+        for site_code, params in parameter_builder(path):
+            count += 1
+            df = fetch_weather_data(site_code, params)
+
+            if df is not None:
+                insert_weather_data(df)
+                print(count)
+
+    except APIRateLimitError as e:
+        print(e)
+        print("stopping ETL because rate limit reached")
 
 
 # testing
