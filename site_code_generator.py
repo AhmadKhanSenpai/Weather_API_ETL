@@ -1,33 +1,60 @@
-import pandas as pd
 import random
 import string
+import pandas as pd
+
+# -----------------------------
+# Configuration
+# -----------------------------
+NUM_SITES = 10_000
+
+LAT_MIN = 23.5
+LAT_MAX = 37.0
+
+LON_MIN = 60.5
+LON_MAX = 77.5
 
 
-def generate_site_code(existing):
+def generate_site_code(existing_codes):
+    """Generate a unique 5-character alphanumeric site code."""
     chars = string.ascii_uppercase + string.digits
+
     while True:
         code = "".join(random.choices(chars, k=5))
-        if code not in existing:
-            existing.add(code)
+
+        if code not in existing_codes:
+            existing_codes.add(code)
             return code
 
 
-# Approximate bounding box of Pakistan
-# Latitude: ~23.5 to 37.0
-# Longitude: ~60.5 to 77.5
-sites = []
-codes = set()
+# Keep track of uniqueness
+used_codes = set()
+used_coordinates = set()
 
-while len(sites) < 10000:
+sites = []
+
+while len(sites) < NUM_SITES:
+
+    latitude = round(random.uniform(LAT_MIN, LAT_MAX), 6)
+    longitude = round(random.uniform(LON_MIN, LON_MAX), 6)
+
+    # Skip duplicate coordinate pairs
+    if (latitude, longitude) in used_coordinates:
+        continue
+
+    used_coordinates.add((latitude, longitude))
+
     sites.append(
         {
-            "site_code": generate_site_code(codes),
-            "latitude": round(random.uniform(23.5, 37.0), 6),
-            "longitude": round(random.uniform(60.5, 77.5), 6),
+            "site_code": generate_site_code(used_codes),
+            "latitude": latitude,
+            "longitude": longitude,
         }
     )
 
+# Create DataFrame
 df = pd.DataFrame(sites)
 
-file_path = "meta_data.csv"
-df.to_csv(file_path, index=False)
+# Save to CSV
+df.to_csv("meta_data.csv", index=False)
+
+print(f"Successfully generated {len(df):,} unique sites.")

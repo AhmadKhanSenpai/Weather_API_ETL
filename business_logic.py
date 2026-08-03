@@ -19,7 +19,7 @@ PATH = "meta_data.csv"
 
 
 # just a class for raising custom built error
-class APIRateLimitError:
+class APIRateLimitError(Exception):
     "Raised when the Open-Meteo hourly rate limit exceeded"
 
     pass
