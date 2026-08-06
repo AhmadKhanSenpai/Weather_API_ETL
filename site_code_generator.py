@@ -7,6 +7,7 @@ import pandas as pd
 # -----------------------------
 NUM_SITES = 10_000
 
+# Pakistan bounding box
 LAT_MIN = 23.5
 LAT_MAX = 37.0
 
@@ -26,35 +27,23 @@ def generate_site_code(existing_codes):
             return code
 
 
-# Keep track of uniqueness
 used_codes = set()
-used_coordinates = set()
 
 sites = []
 
-while len(sites) < NUM_SITES:
-
-    latitude = round(random.uniform(LAT_MIN, LAT_MAX), 6)
-    longitude = round(random.uniform(LON_MIN, LON_MAX), 6)
-
-    # Skip duplicate coordinate pairs
-    if (latitude, longitude) in used_coordinates:
-        continue
-
-    used_coordinates.add((latitude, longitude))
+for _ in range(NUM_SITES):
 
     sites.append(
         {
             "site_code": generate_site_code(used_codes),
-            "latitude": latitude,
-            "longitude": longitude,
+            "latitude": round(random.uniform(LAT_MIN, LAT_MAX), 6),
+            "longitude": round(random.uniform(LON_MIN, LON_MAX), 6),
+            "status": pd.NA,
         }
     )
 
-# Create DataFrame
 df = pd.DataFrame(sites)
 
-# Save to CSV
 df.to_csv("meta_data.csv", index=False)
 
-print(f"Successfully generated {len(df):,} unique sites.")
+print(f"Successfully generated {len(df):,} sites.")
