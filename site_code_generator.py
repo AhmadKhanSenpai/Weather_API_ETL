@@ -5,7 +5,7 @@ import pandas as pd
 # -----------------------------
 # Configuration
 # -----------------------------
-NUM_SITES = 100
+NUM_SITES = 10_000
 
 # Pakistan bounding box
 LAT_MIN = 23.5
