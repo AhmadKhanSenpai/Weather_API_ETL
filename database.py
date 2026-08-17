@@ -56,6 +56,26 @@ def create_weather_table():
     print("weather_hourly table created successfully.")
 
 
+def create_tracking_table():
+    query = """
+    CREATE TABLE IF NOT EXIST tracker(
+    site_code VARCHAR(50) REFERENCES sites(site_code),
+    status BOOLEAN NOT NULL,
+    PRIMARY KEY (site_code)
+    );
+    """
+    with engine.begin() as conn:
+        conn.execute(text(query))
+
+    print("tracker table created successfully")
+
+
+def insert_tracking_data():
+    query = """
+    UPDATE 
+    """
+
+
 def insert_meta_data(df):
     """This funtion will deal with the duplicate values if inserted"""
 
