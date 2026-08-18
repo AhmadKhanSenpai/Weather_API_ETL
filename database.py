@@ -58,7 +58,7 @@ def create_weather_table():
 
 def create_tracking_table():
     query = """
-    CREATE TABLE IF NOT EXIST tracker(
+    CREATE TABLE IF NOT EXISTS tracker(
     site_code VARCHAR(50) REFERENCES sites(site_code),
     status BOOLEAN NOT NULL,
     PRIMARY KEY (site_code)
@@ -70,10 +70,16 @@ def create_tracking_table():
     print("tracker table created successfully")
 
 
-def insert_tracking_data():
+def update_tracking_status(site_code, status):
     query = """
-    UPDATE 
+    INSERT INTO tracker (site_code, status)
+    VALUES (:site_code, :status)
+
+    ON CONFLICT (site_code)
+    DO UPDATE SET status = EXCLUDED.status;
     """
+    with engine.begin() as conn:
+        conn.execute(text(query), {"site_code": site_code, "status": status})
 
 
 def insert_meta_data(df):
