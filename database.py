@@ -1,7 +1,8 @@
-import os
-
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+
+import os
+import pandas as pd
 
 load_dotenv()
 
@@ -80,6 +81,15 @@ def update_tracking_status(site_code, status):
     """
     with engine.begin() as conn:
         conn.execute(text(query), {"site_code": site_code, "status": status})
+
+
+def read_failed_sites():
+    query = """
+    SELECT * 
+    FROM tracker 
+    WHERE status = false
+    """
+    return pd.read_sql_query(query, engine)
 
 
 def insert_meta_data(df):
