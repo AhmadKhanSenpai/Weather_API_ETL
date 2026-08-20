@@ -92,6 +92,15 @@ def read_failed_sites():
     return pd.read_sql_query(query, engine)
 
 
+def read_parsed_sites():
+    query = """
+    SELECT *
+    FROM tracker
+    WHERE status = true
+    """
+    return pd.read_sql_query(query, engine)
+
+
 def insert_meta_data(df):
     """This funtion will deal with the duplicate values if inserted"""
 

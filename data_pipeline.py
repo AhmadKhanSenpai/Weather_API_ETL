@@ -9,9 +9,7 @@ import database as db
 import time
 import sys
 
-# retries and backoff factors
-retry_session = retry(retries=3, backoff_factor=0.5)
-openmeteo = openmeteo_requests.Client(session=retry_session)
+openmeteo = openmeteo_requests.Client()
 
 # lets define constant varaibles
 URL = "https://api.open-meteo.com/v1/forecast"
@@ -65,6 +63,9 @@ def parser(row):
 
     except Exception as e:
         error_message = str(e)
+        print("EXCEPTION TYPE:", type(e))
+        print("EXCEPTION:", repr(e))
+        print("EXCEPTION STR:", str(e))
 
         # raise error if hourly limit reached
         if "Hourly API request limit exceeded" in error_message:
@@ -73,8 +74,8 @@ def parser(row):
             wait_seconds = max(
                 remaining_time.total_seconds(), 0
             )  # in case if Hourly limit error hit unexpectidly after an hour for some reason
-            time.sleep(wait_seconds)
             print(f"Hourly API request limit exceeded: {wait_seconds}")
+            time.sleep(wait_seconds)
 
         elif "Minutely API request limit exceeded" in error_message:
             time_elapsed = dt.now() - START_TIME
@@ -82,8 +83,8 @@ def parser(row):
             wait_seconds = max(
                 remaining_time.total_seconds(), 0
             )  # same reason as above
-            time.sleep(wait_seconds)
             print(f"Minutely API request limit exceeded: {wait_seconds}")
+            time.sleep(wait_seconds)
 
         elif "Daily API request limit exceeded" in error_message:
             sys.exit("Daily API request limit reached, give it a rest see ya tomorrow")
