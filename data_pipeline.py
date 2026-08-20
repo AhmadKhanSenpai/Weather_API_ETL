@@ -1,10 +1,8 @@
 from datetime import datetime as dt
 from datetime import timedelta as td
-from retry_requests import retry
 
 import openmeteo_requests
 import pandas as pd
-import requests_cache
 import database as db
 import time
 import sys
@@ -14,8 +12,6 @@ openmeteo = openmeteo_requests.Client()
 # lets define constant varaibles
 URL = "https://api.open-meteo.com/v1/forecast"
 PATH = "meta_data.csv"
-START_TIME = dt.now()
-TRACKING_PATH = "tracking.csv"
 
 
 def create_meta_table():
@@ -57,41 +53,34 @@ def parser(row):
         "end_date": end_date,
     }
 
-    try:
-        # sending request to API
-        responses = openmeteo.weather_api(url=URL, params=params)
+    while True:
+        try:
+            responses = openmeteo.weather_api(url=URL, params=params)
+            break
 
-    except Exception as e:
-        error_message = str(e)
-        print("EXCEPTION TYPE:", type(e))
-        print("EXCEPTION:", repr(e))
-        print("EXCEPTION STR:", str(e))
+        except Exception as e:
+            error_message = str(e)
 
-        # raise error if hourly limit reached
-        if "Hourly API request limit exceeded" in error_message:
-            time_elapsed = dt.now() - START_TIME
-            remaining_time = td(hours=1) - time_elapsed
-            wait_seconds = max(
-                remaining_time.total_seconds(), 0
-            )  # in case if Hourly limit error hit unexpectidly after an hour for some reason
-            print(f"Hourly API request limit exceeded: {wait_seconds}")
-            time.sleep(wait_seconds)
+            print("EXCEPTION TYPE:", type(e))
+            print("EXCEPTION:", repr(e))
 
-        elif "Minutely API request limit exceeded" in error_message:
-            time_elapsed = dt.now() - START_TIME
-            remaining_time = td(minutes=1) - time_elapsed
-            wait_seconds = max(
-                remaining_time.total_seconds(), 0
-            )  # same reason as above
-            print(f"Minutely API request limit exceeded: {wait_seconds}")
-            time.sleep(wait_seconds)
+            if "Hourly API request limit exceeded" in error_message:
+                print("Hourly API request limit exceeded. Waiting 1 hour...")
+                time.sleep(3600)
+                continue
 
-        elif "Daily API request limit exceeded" in error_message:
-            sys.exit("Daily API request limit reached, give it a rest see ya tomorrow")
+            elif "Minutely API request limit exceeded" in error_message:
+                print("Minutely API request limit exceeded. Waiting 1 minute...")
+                time.sleep(60)
+                continue
 
-        # response failed so status is going to be False
-        db.update_tracking_status(site_code=site_code, status=False)
-        return None
+            elif "Daily API request limit exceeded" in error_message:
+                sys.exit(
+                    "Daily API request limit reached, give it a rest see ya tomorrow"
+                )
+
+            db.update_tracking_status(site_code=site_code, status=False)
+            return None
 
     response = responses[0]
 
@@ -127,8 +116,6 @@ def parser(row):
 def new_sites_fetch_data(path):
     # changing the global variable here in case if we import in function in another file
     # and call the function there it will not reset the start time after the first execution.
-    global START_TIME
-    START_TIME = dt.now()
 
     # batch size
     batch_size = 100
@@ -136,8 +123,12 @@ def new_sites_fetch_data(path):
     # inserting the meta data in database
     insert_meta_data(path)
 
-    # fetching the data
+    # fetching the data and filtering the sites that are already done
     df = pd.read_csv(path)
+    tracker = db.read_parsed_sites()
+
+    mask = ~df["site_code"].isin(tracker["site_code"])
+    df = df.loc[mask]
 
     # instead of getting the data of 10,000 sites we are gonna insert 100 sites data over time
     for start in range(0, len(df), batch_size):
@@ -146,14 +137,14 @@ def new_sites_fetch_data(path):
         df_series = batch_df.apply(parser, axis=1)
 
         # filtered the data as failed values returned None
-        df_filtered = [data for data in df_series if data is not None]
+        parsed_data = [data for data in df_series if data is not None]
 
         # a small check in case if the list is empty
-        if not df_filtered:
+        if not parsed_data:
             print("There is nothing to insert into database, Please try again!")
             return
 
-        result_df = pd.concat(df_filtered)
+        result_df = pd.concat(parsed_data)
 
         # inserting the data in database
         insert_weather_data(result_df)
@@ -164,15 +155,10 @@ def failed_sites_retry(path):
     # and call the function there it will not reset the start time after the first execution.
     attempts = 0
     while True:
-        global START_TIME
-        START_TIME = dt.now()
 
         # using tracker to filter sites that failed
         df = pd.read_csv(path)
-        tracker = db.read_failed_sites()
-
-        # filtering only sites that failed
-        failed_sites = tracker.loc[tracker["status"] == False]
+        failed_sites = db.read_failed_sites()
 
         # if there are no failed site break the loop
         if failed_sites.empty:
