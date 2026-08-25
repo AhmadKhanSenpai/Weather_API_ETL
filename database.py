@@ -71,7 +71,7 @@ def create_tracking_table():
     print("tracker table created successfully")
 
 
-def update_tracking_status(site_code, status):
+def update_tracking_status(site_codes, status):
     query = """
     INSERT INTO tracker (site_code, status)
     VALUES (:site_code, :status)
@@ -79,8 +79,13 @@ def update_tracking_status(site_code, status):
     ON CONFLICT (site_code)
     DO UPDATE SET status = EXCLUDED.status;
     """
+    data = [{"site_code": site_code, "status": status} for site_code in site_codes]
+
+    if not data:
+        return
+
     with engine.begin() as conn:
-        conn.execute(text(query), {"site_code": site_code, "status": status})
+        conn.execute(text(query), data)
 
 
 def read_failed_sites():
