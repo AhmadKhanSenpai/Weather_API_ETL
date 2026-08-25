@@ -53,7 +53,11 @@ def parser(row):
         "end_date": end_date,
     }
 
+    max_attempts = 5
+    attempts = 0
+
     while True:
+
         try:
             responses = openmeteo.weather_api(url=URL, params=params)
             break
@@ -61,26 +65,211 @@ def parser(row):
         except Exception as e:
             error_message = str(e)
 
-            print("EXCEPTION TYPE:", type(e))
+            print("\nEXCEPTION TYPE:", type(e))
             print("EXCEPTION:", repr(e))
 
+            # ----------------------------------
+            # Open-Meteo hourly request limit
+            # ----------------------------------
             if "Hourly API request limit exceeded" in error_message:
-                print("Hourly API request limit exceeded. Waiting 1 hour...")
+
+                attempts += 1
+
+                if attempts >= max_attempts:
+                    print(
+                        f"Maximum attempts ({max_attempts}) reached "
+                        f"for site {site_code}."
+                    )
+                    return None
+
+                print(
+                    f"Hourly API request limit exceeded. "
+                    f"Waiting 1 hour... "
+                    f"Attempt {attempts}/{max_attempts}"
+                )
+
                 time.sleep(3600)
                 continue
 
+            # ----------------------------------
+            # Open-Meteo minutely request limit
+            # ----------------------------------
             elif "Minutely API request limit exceeded" in error_message:
-                print("Minutely API request limit exceeded. Waiting 1 minute...")
+
+                attempts += 1
+
+                if attempts >= max_attempts:
+                    print(
+                        f"Maximum attempts ({max_attempts}) reached "
+                        f"for site {site_code}."
+                    )
+                    return None
+
+                print(
+                    f"Minutely API request limit exceeded. "
+                    f"Waiting 1 minute... "
+                    f"Attempt {attempts}/{max_attempts}"
+                )
+
                 time.sleep(60)
                 continue
 
+            # ----------------------------------
+            # Open-Meteo daily request limit
+            # ----------------------------------
             elif "Daily API request limit exceeded" in error_message:
+
                 sys.exit(
                     "Daily API request limit reached, give it a rest see ya tomorrow"
                 )
 
-            db.update_tracking_status(site_code=site_code, status=False)
-            return None
+            # ----------------------------------
+            # 429 - Too Many Requests
+            # ----------------------------------
+            elif "429" in error_message:
+
+                attempts += 1
+
+                if attempts >= max_attempts:
+                    print(
+                        f"Maximum attempts ({max_attempts}) reached "
+                        f"for site {site_code}."
+                    )
+                    return None
+
+                print(
+                    f"HTTP 429 - Too Many Requests. "
+                    f"Waiting 1 hour... "
+                    f"Attempt {attempts}/{max_attempts}"
+                )
+
+                time.sleep(3600)
+                continue
+
+            # ----------------------------------
+            # 500 - Internal Server Error
+            # ----------------------------------
+            elif "500" in error_message:
+
+                attempts += 1
+
+                if attempts >= max_attempts:
+                    print(
+                        f"Maximum attempts ({max_attempts}) reached "
+                        f"for site {site_code}."
+                    )
+                    return None
+
+                print(
+                    f"HTTP 500 - Internal Server Error. "
+                    f"Waiting 1 minute... "
+                    f"Attempt {attempts}/{max_attempts}"
+                )
+
+                time.sleep(60)
+                continue
+
+            # ----------------------------------
+            # 502 - Bad Gateway
+            # ----------------------------------
+            elif "502" in error_message:
+
+                attempts += 1
+
+                if attempts >= max_attempts:
+                    print(
+                        f"HTTP 502 - Bad Gateway. "
+                        f"Waiting 1 minute... "
+                        f"Attempt {attempts}/{max_attempts}"
+                    )
+                    return None
+
+                print(
+                    f"HTTP 502 - Bad Gateway. "
+                    f"Waiting 1 minute... "
+                    f"Attempt {attempts}/{max_attempts}"
+                )
+
+                time.sleep(60)
+                continue
+
+            # ----------------------------------
+            # 503 - Service Unavailable
+            # ----------------------------------
+            elif "503" in error_message:
+
+                attempts += 1
+
+                if attempts >= max_attempts:
+                    print(
+                        f"HTTP 503 - Service Unavailable. "
+                        f"Maximum attempts ({max_attempts}) reached "
+                        f"for site {site_code}."
+                    )
+                    return None
+
+                print(
+                    f"HTTP 503 - Service Unavailable. "
+                    f"Waiting 1 minute... "
+                    f"Attempt {attempts}/{max_attempts}"
+                )
+
+                time.sleep(60)
+                continue
+
+            # ----------------------------------
+            # 504 - Gateway Timeout
+            # ----------------------------------
+            elif "504" in error_message:
+
+                attempts += 1
+
+                if attempts >= max_attempts:
+                    print(
+                        f"HTTP 504 - Gateway Timeout. "
+                        f"Maximum attempts ({max_attempts}) reached "
+                        f"for site {site_code}."
+                    )
+                    return None
+
+                print(
+                    f"HTTP 504 - Gateway Timeout. "
+                    f"Waiting 1 minute... "
+                    f"Attempt {attempts}/{max_attempts}"
+                )
+
+                time.sleep(60)
+                continue
+
+            # ----------------------------------
+            # 400 - Bad Request
+            # ----------------------------------
+            elif "400" in error_message:
+
+                print(
+                    f"HTTP 400 - Bad Request for site {site_code}. "
+                    f"Check API parameters."
+                )
+                return None
+
+            # ----------------------------------
+            # 404 - Not Found
+            # ----------------------------------
+            elif "404" in error_message:
+
+                print(f"HTTP 404 - Resource not found for site {site_code}.")
+                return None
+
+            # ----------------------------------
+            # Unknown exception
+            # ----------------------------------
+            else:
+
+                print(
+                    f"Unknown API error for site {site_code}. "
+                    f"Site marked as failed."
+                )
+                return None
 
     response = responses[0]
 
@@ -108,8 +297,6 @@ def parser(row):
 
     hourly_dataframe = pd.DataFrame(data=hourly_data)
 
-    # response did not failed so status is going to be True
-    db.update_tracking_status(site_code=site_code, status=True)
     return hourly_dataframe
 
 
@@ -127,8 +314,12 @@ def new_sites_fetch_data(path):
     df = pd.read_csv(path)
     tracker = db.read_parsed_sites()
 
+    # in case if the API is interupted due to any reason
     mask = ~df["site_code"].isin(tracker["site_code"])
     df = df.loc[mask]
+
+    if df.empty:
+        return
 
     # instead of getting the data of 10,000 sites we are gonna insert 100 sites data over time
     for start in range(0, len(df), batch_size):
@@ -149,10 +340,19 @@ def new_sites_fetch_data(path):
         # inserting the data in database
         insert_weather_data(result_df)
 
+        # here we will check which sites in batch passed and which failed
+        successful_sites = result_df["site_code"].unique()
+        mask = ~batch_df["site_code"].isin(successful_sites)
+        failed_sites = batch_df.loc[mask, "site_code"].tolist()
+
+        db.update_tracking_status(successful_sites, status=True)
+        db.update_tracking_status(failed_sites, status=False)
+
 
 def failed_sites_retry(path):
     # changing the global variable here in case if we import in function in another file
     # and call the function there it will not reset the start time after the first execution.
+    max_attempts = 10
     attempts = 0
     while True:
 
@@ -164,23 +364,33 @@ def failed_sites_retry(path):
         if failed_sites.empty:
             break
 
+        if attempts >= max_attempts:
+            break
+
         mask = df["site_code"].isin(failed_sites["site_code"])
         df_failed_sites = df.loc[mask]
 
         # now using dataframe of failed sites only we are going to retry them
         df_series = df_failed_sites.apply(parser, axis=1)
 
-        df_filtered = [data for data in df_series if data is not None]
+        parsed_data = [data for data in df_series if data is not None]
 
-        if not df_filtered:
+        if not parsed_data:
             attempts += 1
             print(f"Still no data is returned, attempt Number: {attempts}")
             continue
 
-        result_df = pd.concat(df_filtered)
+        result_df = pd.concat(parsed_data)
 
-        # now we are going to insert the filtered data in database
+        # now we are going to insert the filtered data in database and also update the status
         insert_weather_data(result_df)
+
+        successful_sites = result_df["site_code"].unique()
+        mask = ~df_failed_sites["site_code"].isin(successful_sites)
+        failed_sites = df_failed_sites.loc[mask, "site_code"].tolist()
+
+        db.update_tracking_status(successful_sites, status=True)
+        db.update_tracking_status(failed_sites, status=False)
 
 
 if __name__ == "__main__":
