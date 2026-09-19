@@ -9,9 +9,9 @@ import sys
 
 openmeteo = openmeteo_requests.Client()
 
-# lets define constant varaibles
 URL = "https://api.open-meteo.com/v1/forecast"
 PATH = "meta_data.csv"
+MAX_ATTEMPTS = 5
 
 
 def create_meta_table():
@@ -35,42 +35,60 @@ def insert_weather_data(df):
     db.insert_weather_data(df)
 
 
-def parser(row):
-    site_code = row["site_code"]
-
-    # calcualting date based on current date
+# Build request params for ONE site
+def build_request_params(latitude, longitude):
     end_date = (dt.now() + td(days=1)).strftime("%Y-%m-%d")
-    diff = (dt.now() + td(days=1)) - td(days=8)
-    start_date = diff.strftime("%Y-%m-%d")
+    start_date = ((dt.now() + td(days=1)) - td(days=8)).strftime("%Y-%m-%d")
 
-    # parameters for request
-    params = {
-        "latitude": row["latitude"],
-        "longitude": row["longitude"],
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
         "hourly": ["temperature_2m", "relative_humidity_2m", "shortwave_radiation"],
         "timezone": "auto",
         "start_date": start_date,
         "end_date": end_date,
     }
 
+
+# Call the API for ONE site — all retry/backoff logic lives here only
+def call_weather_api(site_code, params):
+    """Returns the raw Open-Meteo response object for this site, or None
+    if it could not be fetched after retries."""
+    attempts = 0
+
     while True:
         try:
             responses = openmeteo.weather_api(url=URL, params=params)
-            break
+            return responses[0]
 
         except Exception as e:
             error_message = str(e)
-
-            print("EXCEPTION TYPE:", type(e))
+            print("\nEXCEPTION TYPE:", type(e))
             print("EXCEPTION:", repr(e))
 
             if "Hourly API request limit exceeded" in error_message:
-                print("Hourly API request limit exceeded. Waiting 1 hour...")
+                attempts += 1
+                if attempts >= MAX_ATTEMPTS:
+                    print(
+                        f"Maximum attempts ({MAX_ATTEMPTS}) reached for site {site_code}."
+                    )
+                    return None
+                print(
+                    f"Hourly limit exceeded. Waiting 1 hour... Attempt {attempts}/{MAX_ATTEMPTS}"
+                )
                 time.sleep(3600)
                 continue
 
             elif "Minutely API request limit exceeded" in error_message:
-                print("Minutely API request limit exceeded. Waiting 1 minute...")
+                attempts += 1
+                if attempts >= MAX_ATTEMPTS:
+                    print(
+                        f"Maximum attempts ({MAX_ATTEMPTS}) reached for site {site_code}."
+                    )
+                    return None
+                print(
+                    f"Minutely limit exceeded. Waiting 1 minute... Attempt {attempts}/{MAX_ATTEMPTS}"
+                )
                 time.sleep(60)
                 continue
 
@@ -79,12 +97,47 @@ def parser(row):
                     "Daily API request limit reached, give it a rest see ya tomorrow"
                 )
 
-            db.update_tracking_status(site_code=site_code, status=False)
-            return None
+            elif "429" in error_message:
+                attempts += 1
+                if attempts >= MAX_ATTEMPTS:
+                    print(
+                        f"Maximum attempts ({MAX_ATTEMPTS}) reached for site {site_code}."
+                    )
+                    return None
+                print(f"HTTP 429. Waiting 1 hour... Attempt {attempts}/{MAX_ATTEMPTS}")
+                time.sleep(3600)
+                continue
 
-    response = responses[0]
+            elif any(code in error_message for code in ("500", "502", "503", "504")):
+                attempts += 1
+                if attempts >= MAX_ATTEMPTS:
+                    print(
+                        f"Server error. Maximum attempts ({MAX_ATTEMPTS}) reached for site {site_code}."
+                    )
+                    return None
+                print(
+                    f"Server error. Waiting 1 minute... Attempt {attempts}/{MAX_ATTEMPTS}"
+                )
+                time.sleep(60)
+                continue
 
-    # Process hourly data. The order of variables needs to be the same as requested.
+            elif "400" in error_message:
+                print(
+                    f"HTTP 400 - Bad Request for site {site_code}. Check API parameters."
+                )
+                return None
+
+            elif "404" in error_message:
+                print(f"HTTP 404 - Resource not found for site {site_code}.")
+                return None
+
+            else:
+                print(f"Unknown API error for site {site_code}. Site marked as failed.")
+                return None
+
+
+# Turn ONE raw response into a DataFrame
+def parse_response_to_dataframe(site_code, response):
     hourly = response.Hourly()
     hourly_temperature_2m = hourly.Variables(0).ValuesAsNumpy()
     hourly_relative_humidity_2m = hourly.Variables(1).ValuesAsNumpy()
@@ -96,91 +149,79 @@ def parser(row):
             end=pd.to_datetime(hourly.TimeEnd(), unit="s", utc=True),
             freq=pd.Timedelta(seconds=hourly.Interval()),
             inclusive="left",
-        )
+        ),
+        "site_code": site_code,
+        "temperature_2m": hourly_temperature_2m,
+        "relative_humidity_2m": hourly_relative_humidity_2m,
+        "global_tilted_irradiance_instant": hourly_global_tilted_irradiance_instant,
     }
 
-    hourly_data["site_code"] = site_code
-    hourly_data["temperature_2m"] = hourly_temperature_2m
-    hourly_data["relative_humidity_2m"] = hourly_relative_humidity_2m
-    hourly_data["global_tilted_irradiance_instant"] = (
-        hourly_global_tilted_irradiance_instant
-    )
+    return pd.DataFrame(data=hourly_data)
 
-    hourly_dataframe = pd.DataFrame(data=hourly_data)
 
-    # response did not failed so status is going to be True
-    db.update_tracking_status(site_code=site_code, status=True)
-    return hourly_dataframe
+# ONE unit of work: site in -> DataFrame or None out.
+# This is the function that will become your Kafka consumer's
+# per-message handler later — that's why it's isolated like this.
+def fetch_site_weather(site_code, latitude, longitude):
+    params = build_request_params(latitude, longitude)
+    response = call_weather_api(site_code, params)
+
+    if response is None:
+        return None
+
+    return parse_response_to_dataframe(site_code, response)
+
+
+# Each site is fetched, inserted, and tracked as a single unit.
+def process_sites(df):
+    for row in df.itertuples(index=False):
+        result_df = fetch_site_weather(row.site_code, row.latitude, row.longitude)
+
+        if result_df is not None:
+            insert_weather_data(result_df)
+            db.update_tracking_status([row.site_code], status=True)
+        else:
+            db.update_tracking_status([row.site_code], status=False)
 
 
 def new_sites_fetch_data(path):
-    # changing the global variable here in case if we import in function in another file
-    # and call the function there it will not reset the start time after the first execution.
-
-    # batch size
-    batch_size = 100
-
-    # inserting the meta data in database
     insert_meta_data(path)
 
-    # fetching the data and filtering the sites that are already done
     df = pd.read_csv(path)
     tracker = db.read_parsed_sites()
 
     mask = ~df["site_code"].isin(tracker["site_code"])
     df = df.loc[mask]
 
-    # instead of getting the data of 10,000 sites we are gonna insert 100 sites data over time
-    for start in range(0, len(df), batch_size):
+    if df.empty:
+        return
 
-        batch_df = df.iloc[start : start + batch_size]
-        df_series = batch_df.apply(parser, axis=1)
-
-        # filtered the data as failed values returned None
-        parsed_data = [data for data in df_series if data is not None]
-
-        # a small check in case if the list is empty
-        if not parsed_data:
-            print("There is nothing to insert into database, Please try again!")
-            return
-
-        result_df = pd.concat(parsed_data)
-
-        # inserting the data in database
-        insert_weather_data(result_df)
+    process_sites(df)
 
 
 def failed_sites_retry(path):
-    # changing the global variable here in case if we import in function in another file
-    # and call the function there it will not reset the start time after the first execution.
+    max_attempts = 10
     attempts = 0
-    while True:
+    df = pd.read_csv(path)  # meta data doesn't change between retries — read once
 
-        # using tracker to filter sites that failed
-        df = pd.read_csv(path)
+    while True:
         failed_sites = db.read_failed_sites()
 
-        # if there are no failed site break the loop
         if failed_sites.empty:
+            break
+        if attempts >= max_attempts:
             break
 
         mask = df["site_code"].isin(failed_sites["site_code"])
         df_failed_sites = df.loc[mask]
 
-        # now using dataframe of failed sites only we are going to retry them
-        df_series = df_failed_sites.apply(parser, axis=1)
+        before = len(df_failed_sites)
+        process_sites(df_failed_sites)
 
-        df_filtered = [data for data in df_series if data is not None]
-
-        if not df_filtered:
+        still_failed = db.read_failed_sites()
+        if len(still_failed) == before:
             attempts += 1
             print(f"Still no data is returned, attempt Number: {attempts}")
-            continue
-
-        result_df = pd.concat(df_filtered)
-
-        # now we are going to insert the filtered data in database
-        insert_weather_data(result_df)
 
 
 if __name__ == "__main__":
