@@ -57,6 +57,7 @@ def call_weather_api(site_code, params):
     attempts = 0
 
     while True:
+
         try:
             responses = openmeteo.weather_api(url=URL, params=params)
             return responses[0]
@@ -66,6 +67,9 @@ def call_weather_api(site_code, params):
             print("\nEXCEPTION TYPE:", type(e))
             print("EXCEPTION:", repr(e))
 
+            # ----------------------------------
+            # Open-Meteo hourly request limit
+            # ----------------------------------
             if "Hourly API request limit exceeded" in error_message:
                 attempts += 1
                 if attempts >= MAX_ATTEMPTS:
@@ -79,6 +83,9 @@ def call_weather_api(site_code, params):
                 time.sleep(3600)
                 continue
 
+            # ----------------------------------
+            # Open-Meteo minutely request limit
+            # ----------------------------------
             elif "Minutely API request limit exceeded" in error_message:
                 attempts += 1
                 if attempts >= MAX_ATTEMPTS:
@@ -92,7 +99,11 @@ def call_weather_api(site_code, params):
                 time.sleep(60)
                 continue
 
+            # ----------------------------------
+            # Open-Meteo daily request limit
+            # ----------------------------------
             elif "Daily API request limit exceeded" in error_message:
+
                 sys.exit(
                     "Daily API request limit reached, give it a rest see ya tomorrow"
                 )
@@ -190,6 +201,7 @@ def new_sites_fetch_data(path):
     df = pd.read_csv(path)
     tracker = db.read_parsed_sites()
 
+    # in case if the API is interupted due to any reason
     mask = ~df["site_code"].isin(tracker["site_code"])
     df = df.loc[mask]
 
@@ -222,6 +234,13 @@ def failed_sites_retry(path):
         if len(still_failed) == before:
             attempts += 1
             print(f"Still no data is returned, attempt Number: {attempts}")
+
+        successful_sites = result_df["site_code"].unique()
+        mask = ~df_failed_sites["site_code"].isin(successful_sites)
+        failed_sites = df_failed_sites.loc[mask, "site_code"].tolist()
+
+        db.update_tracking_status(successful_sites, status=True)
+        db.update_tracking_status(failed_sites, status=False)
 
 
 if __name__ == "__main__":
