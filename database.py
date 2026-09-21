@@ -61,7 +61,7 @@ def create_tracking_table():
     query = """
     CREATE TABLE IF NOT EXISTS tracker(
     site_code VARCHAR(50) REFERENCES sites(site_code),
-    status BOOLEAN NOT NULL,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('success', 'retryable', 'permanent')),
     PRIMARY KEY (site_code)
     );
     """
@@ -92,7 +92,7 @@ def read_failed_sites():
     query = """
     SELECT * 
     FROM tracker 
-    WHERE status = false
+    WHERE status = 'retryable'
     """
     return pd.read_sql_query(query, engine)
 
@@ -101,7 +101,7 @@ def read_parsed_sites():
     query = """
     SELECT *
     FROM tracker
-    WHERE status = true
+    WHERE status = 'success'
     """
     return pd.read_sql_query(query, engine)
 
@@ -156,3 +156,4 @@ def insert_weather_data(df):
 if __name__ == "__main__":
     create_sites_table()
     create_weather_table()
+    create_tracking_table()
