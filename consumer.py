@@ -1,12 +1,11 @@
 import json
 import sys
 from confluent_kafka import Consumer
-from data_pipeline import fetch_site_weather, insert_weather_data
-import database as db
+from data_pipeline import insert_weather_data
 
 sys.stdout.reconfigure(line_buffering=True)
 
-TOPIC = "site_requests"
+TOPIC = "weather_sensor_data"
 
 conf = {
     "bootstrap.servers": "localhost:9092",
@@ -20,20 +19,11 @@ consumer.subscribe([TOPIC])
 
 
 def process_message(msg):
-    record = json.loads(msg.value().decode("utf-8"))
-    site_code = record["site_code"]
+    site_code = msg.key().decode("utf-8")
+    weather_data = json.loads(msg.value().decode("utf-8"))
 
-    result_df, outcome = fetch_site_weather(
-        site_code, record["latitude"], record["longitude"]
-    )
+    insert_weather_data(weather_data)
 
-    if result_df is not None:
-        insert_weather_data(result_df)
-        print(f"[OK] {site_code} — {len(result_df)} rows inserted")
-    else:
-        print(f"[{outcome.upper()}] {site_code} — no data returned")
-
-    db.update_tracking_status([site_code], status=outcome)
     consumer.commit(msg)
 
 

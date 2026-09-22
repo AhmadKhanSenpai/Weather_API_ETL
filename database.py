@@ -20,21 +20,6 @@ engine = create_engine(
 )
 
 
-def create_sites_table():
-    query = """
-    CREATE TABLE IF NOT EXISTS sites (
-        site_code VARCHAR(50) PRIMARY KEY,
-        latitude DOUBLE PRECISION NOT NULL,
-        longitude DOUBLE PRECISION NOT NULL
-    );
-    """
-
-    with engine.begin() as conn:
-        conn.execute(text(query))
-
-    print("sites table created successfully.")
-
-
 def create_weather_table():
     query = """
     CREATE TABLE IF NOT EXISTS weather_hourly (
@@ -45,7 +30,7 @@ def create_weather_table():
         global_tilted_irradiance_instant DOUBLE PRECISION,
 
         FOREIGN KEY (site_code)
-        REFERENCES sites(site_code),
+        REFERENCES tracker(site_code),
 
         UNIQUE(site_code, date)
     );
@@ -60,8 +45,8 @@ def create_weather_table():
 def create_tracking_table():
     query = """
     CREATE TABLE IF NOT EXISTS tracker(
-    site_code VARCHAR(50) REFERENCES sites(site_code),
-    status VARCHAR(20) NOT NULL CHECK (status IN ('success', 'retryable', 'permanent')),
+    site_code VARCHAR(50) NOT NULL,
+    status BOOLEAN NOT NULL,
     PRIMARY KEY (site_code)
     );
     """
@@ -71,7 +56,7 @@ def create_tracking_table():
     print("tracker table created successfully")
 
 
-def update_tracking_status(site_codes, status):
+def update_tracking_status(site_code, status):
     query = """
     INSERT INTO tracker (site_code, status)
     VALUES (:site_code, :status)
@@ -79,10 +64,8 @@ def update_tracking_status(site_codes, status):
     ON CONFLICT (site_code)
     DO UPDATE SET status = EXCLUDED.status;
     """
-    data = [{"site_code": site_code, "status": status} for site_code in site_codes]
 
-    if not data:
-        return
+    data = {"site_code": site_code, "status": status}
 
     with engine.begin() as conn:
         conn.execute(text(query), data)
@@ -92,7 +75,7 @@ def read_failed_sites():
     query = """
     SELECT * 
     FROM tracker 
-    WHERE status = 'retryable'
+    WHERE status = false
     """
     return pd.read_sql_query(query, engine)
 
@@ -101,31 +84,12 @@ def read_parsed_sites():
     query = """
     SELECT *
     FROM tracker
-    WHERE status = 'success'
+    WHERE status = true
     """
     return pd.read_sql_query(query, engine)
 
 
-def insert_meta_data(df):
-    """This funtion will deal with the duplicate values if inserted"""
-
-    query = """
-    INSERT INTO sites (site_code, latitude, longitude)
-    VALUES (:site_code, :latitude, :longitude)
-
-    ON CONFLICT (site_code)
-    DO NOTHING;
-    """
-
-    data = df.to_dict(orient="records")
-
-    with engine.begin() as conn:
-        conn.execute(text(query), data)
-
-    print("Metadata inserted successfully.")
-
-
-def insert_weather_data(df):
+def insert_weather_data(weather_data):
 
     query = """
     INSERT INTO weather_hourly (
@@ -147,13 +111,10 @@ def insert_weather_data(df):
     DO NOTHING;
     """
 
-    data = df.to_dict(orient="records")
-
     with engine.begin() as conn:
-        conn.execute(text(query), data)
+        conn.execute(text(query), weather_data)
 
 
 if __name__ == "__main__":
-    create_sites_table()
-    create_weather_table()
     create_tracking_table()
+    create_weather_table()
