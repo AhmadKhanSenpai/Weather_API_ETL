@@ -27,19 +27,20 @@ def retry_failed_sites(path):
         )
 
         if result_dict is not None:
-            db.update_tracking_status(site_code=site_code, status=True)
-            print(f"[OK] {site_code} — {len(result_dict)} rows inserted")
+            db.update_tracking_status(
+                site_code=site_code, status=False
+            )  # same placeholder reasoning as producer.py
+            producer.produce(
+                TOPIC,
+                key=site_code.encode("utf-8"),
+                value=json.dumps(result_dict).encode("utf-8"),
+                on_delivery=delivery_report,
+            )
+            print(f"[OK] {site_code} — requeued")
 
         else:
             db.update_tracking_status(site_code=site_code, status=False)
             print(f"[FAIL] {site_code}")
-
-        producer.produce(
-            TOPIC,
-            key=site_code.encode("utf-8"),
-            value=json.dumps(result_dict).encode("utf-8"),
-            on_delivery=delivery_report,
-        )
 
         producer.poll(0)
 

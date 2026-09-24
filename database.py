@@ -104,7 +104,7 @@ def insert_weather_data(weather_data):
         :date,
         :temperature_2m,
         :relative_humidity_2m,
-        :global_tilted_irradiance_instant
+        :shortwave_radiation
     )
 
     ON CONFLICT (site_code, date)
