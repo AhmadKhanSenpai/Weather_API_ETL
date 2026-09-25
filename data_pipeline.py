@@ -35,7 +35,26 @@ def call_weather_api(site_code, params):
     attempts = 0
 
     while True:
-        response = requests.get(URL, params=params).json()
+        try:
+            response = requests.get(URL, params=params, timeout=30).json()
+
+        except (requests.exceptions.RequestException, ValueError) as e:
+            # RequestException = dropped connection, timeout, DNS failure, etc.
+            # ValueError = response came back but wasn't valid JSON at all.
+            attempts += 1
+            print(f"[{site_code}] Network error: {e}")
+
+            if attempts >= max_attempts:
+                print(
+                    f"[{site_code}] Failed after {max_attempts} attempts — moving on."
+                )
+                return None
+
+            print(
+                f"[{site_code}] Retrying in 15 seconds ({attempts}/{max_attempts})..."
+            )
+            time.sleep(15)
+            continue
 
         if response.get("error"):
             reason = response.get("reason", "")
