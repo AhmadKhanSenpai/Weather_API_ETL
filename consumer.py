@@ -63,10 +63,9 @@ def run():
             try:
                 process_message(msg)
             except Exception as e:
-                # Without this, one bad message (e.g. the FK race you just hit)
-                # kills the entire consumer process, not just that message.
+                # Without this, one bad message kills the entire consumer process, not just that message.
                 print(f"[ERROR] offset={msg.offset()} site={msg.key()}: {e}")
-                consumer.commit(msg)  # see trade-off note below
+                consumer.commit(msg)
 
     finally:
         consumer.close()

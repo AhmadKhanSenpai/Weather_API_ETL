@@ -6,7 +6,7 @@ import pandas as pd
 
 load_dotenv()
 
-# using dot_env so i dont need to hard code my sensitive info
+# fetching environment variables
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_HOST = os.getenv("DB_HOST")
