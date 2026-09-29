@@ -41,6 +41,11 @@ def produce_weather_data(path):
         site_code = row.site_code
         lat = row.latitude
         lon = row.longitude
+
+        # determine partition based on even and odd site_codes
+        last_digit = int(row.site_code[-1])
+        partition = 0 if last_digit % 2 == 0 else 1
+
         result_json = fetch_site_weather(
             site_code=site_code, latitude=lat, longitude=lon
         )
@@ -52,6 +57,7 @@ def produce_weather_data(path):
                 topic=TOPIC,
                 key=row.site_code.encode("utf-8"),
                 value=json.dumps(result_json).encode("utf-8"),
+                partition=partition,
                 callback=delivery_report,
             )
 

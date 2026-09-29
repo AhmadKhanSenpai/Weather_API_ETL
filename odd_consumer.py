@@ -1,6 +1,6 @@
 import json
 import sys
-from confluent_kafka import Consumer
+from confluent_kafka import Consumer, TopicPartition
 from database import insert_weather_data
 
 # so the print statement is not buffered
@@ -16,7 +16,7 @@ conf = {
 }
 
 consumer = Consumer(conf)
-consumer.subscribe([TOPIC])
+consumer.assign([TopicPartition(TOPIC, 1)])
 
 
 def transform_weather_data(weather_data, site_code):
@@ -41,11 +41,14 @@ def process_message(msg):
     site_code = msg.key().decode("utf-8")
 
     weather_data = json.loads(msg.value().decode("utf-8"))
+
     rows = transform_weather_data(weather_data, site_code)
 
     insert_weather_data(rows)
-    consumer.commit(msg)
+
     print(f"[OK] {site_code} — {len(rows)} rows inserted")
+
+    consumer.commit(msg)
 
 
 def run():
