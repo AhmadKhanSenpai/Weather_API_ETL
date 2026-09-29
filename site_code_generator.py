@@ -1,49 +1,117 @@
 import random
 import string
+
+import geopandas as gpd
 import pandas as pd
+from shapely.geometry import Point
 
-# -----------------------------
-# Configuration
-# -----------------------------
-NUM_SITES = 10_000
+# Change this to whatever number of sites you want
+NUM_SITES = 100_000
 
-# Pakistan bounding box
-LAT_MIN = 23.5
-LAT_MAX = 37.0
+OUTPUT_FILE = "meta_data.csv"
 
-LON_MIN = 60.5
-LON_MAX = 77.5
+# Use a fixed seed if you want the same random coordinates
+# every time you run the script.
+random.seed(42)
 
 
-def generate_site_code(existing_codes):
-    """Generate a unique 5-character alphanumeric site code."""
-    chars = string.ascii_uppercase + string.digits
+SOUTH_ASIA = [
+    "Afghanistan",
+    "Bangladesh",
+    "Bhutan",
+    "India",
+    "Maldives",
+    "Nepal",
+    "Pakistan",
+    "Sri Lanka",
+]
+
+
+def generate_site_code(number):
+    """
+    Generate a unique site code.
+
+    Examples:
+        0       -> AA000
+        1       -> AA001
+        999     -> AA999
+        1000    -> AB000
+        1999    -> AB999
+        26000   -> BA000
+    """
+
+    numeric_part = number % 1000
+    letter_number = number // 1000
+
+    first_letter = string.ascii_uppercase[(letter_number // 26) % 26]
+
+    second_letter = string.ascii_uppercase[letter_number % 26]
+
+    return f"{first_letter}{second_letter}{numeric_part:03d}"
+
+
+def generate_land_point(land):
+    """Generate a random point that falls inside South Asian land."""
+
+    minx, miny, maxx, maxy = land.total_bounds
 
     while True:
-        code = "".join(random.choices(chars, k=5))
+        longitude = random.uniform(minx, maxx)
+        latitude = random.uniform(miny, maxy)
 
-        if code not in existing_codes:
-            existing_codes.add(code)
-            return code
+        point = Point(longitude, latitude)
+
+        if land.contains(point).any():
+            return latitude, longitude
 
 
-used_codes = set()
+# --------------------------------------------------
+# Load country boundaries
+# --------------------------------------------------
+
+countries = gpd.read_file(
+    "https://naturalearth.s3.amazonaws.com/110m_cultural/"
+    "ne_110m_admin_0_countries.zip"
+)
+
+
+# --------------------------------------------------
+# Select South Asian countries
+# --------------------------------------------------
+
+south_asia = countries[countries["NAME"].isin(SOUTH_ASIA)]
+
+land = south_asia[["NAME", "geometry"]]
+
+
+# --------------------------------------------------
+# Generate sites
+# --------------------------------------------------
 
 sites = []
 
-for _ in range(NUM_SITES):
+for i in range(NUM_SITES):
+
+    site_code = generate_site_code(i)
+
+    latitude, longitude = generate_land_point(land)
 
     sites.append(
         {
-            "site_code": generate_site_code(used_codes),
-            "latitude": round(random.uniform(LAT_MIN, LAT_MAX), 6),
-            "longitude": round(random.uniform(LON_MIN, LON_MAX), 6),
-            "status": pd.NA,
+            "site_code": site_code,
+            "latitude": latitude,
+            "longitude": longitude,
         }
     )
 
+
+# --------------------------------------------------
+# Save CSV
+# --------------------------------------------------
+
 df = pd.DataFrame(sites)
 
-df.to_csv("meta_data.csv", index=False)
+df.to_csv(OUTPUT_FILE, index=False)
 
-print(f"Successfully generated {len(df):,} sites.")
+print(f"{NUM_SITES:,} sites generated successfully.")
+print(f"Saved to: {OUTPUT_FILE}")
