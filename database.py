@@ -27,7 +27,7 @@ def create_weather_table():
         date TIMESTAMPTZ NOT NULL,
         temperature_2m DOUBLE PRECISION,
         relative_humidity_2m DOUBLE PRECISION,
-        global_tilted_irradiance_instant DOUBLE PRECISION,
+        shortwave_radiation DOUBLE PRECISION,
 
         FOREIGN KEY (site_code)
         REFERENCES tracker(site_code),
@@ -54,6 +54,51 @@ def create_tracking_table():
         conn.execute(text(query))
 
     print("tracker table created successfully")
+
+
+def create_analytics_table():
+    query = """
+    CREATE TABLE IF NOT EXISTS sites_daily_stats(
+        site_code VARCHAR(50) NOT NULL,
+        date DATE NOT NULL,
+        avg_temperature_2m DOUBLE PRECISION,
+        avg_relative_humidity_2m DOUBLE PRECISION,
+        avg_shortwave_radiation DOUBLE PRECISION,
+        PRIMARY KEY (site_code, date)
+
+    );"""
+
+    with engine.begin() as conn:
+        conn.execute(text(query))
+
+    print("sites_daily_stats table created successfully")
+
+
+def insert_daily_aggregate(aggregate_data):
+    if aggregate_data.empty:
+        return
+
+    query = """
+    INSERT INTO sites_daily_stats(
+        site_code,
+        date,
+        avg_temperature_2m,
+        avg_relative_humidity_2m,
+        avg_shortwave_radiation
+    )
+    VALUES (
+        :site_code,
+        :date,
+        :temperature_2m,
+        :relative_humidity_2m,
+        :shortwave_radiation
+    )
+    ON CONFLICT (site_code, date)
+    DO NOTHING;
+    """
+
+    with engine.begin() as conn:
+        conn.execute(text(query), aggregate_data.to_dict(orient="records"))
 
 
 def update_tracking_status(site_code, status):
@@ -97,7 +142,7 @@ def insert_weather_data(weather_data):
         date,
         temperature_2m,
         relative_humidity_2m,
-        global_tilted_irradiance_instant
+        shortwave_radiation
     )
     VALUES (
         :site_code,
