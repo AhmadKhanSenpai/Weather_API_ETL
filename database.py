@@ -28,6 +28,13 @@ def create_weather_table():
         temperature_2m DOUBLE PRECISION,
         relative_humidity_2m DOUBLE PRECISION,
         shortwave_radiation DOUBLE PRECISION,
+        cloud_cover DOUBLE PRECISION, 
+        wind_speed_10m DOUBLE PRECISION, 
+        wind_speed_80m DOUBLE PRECISION, 
+        wind_gusts_10m DOUBLE PRECISION,
+        wind_direction_80m DOUBLE PRECISION, 
+        precipitation DOUBLE PRECISION, 
+        dew_point_2m DOUBLE PRECISION,
 
         FOREIGN KEY (site_code)
         REFERENCES tracker(site_code),
@@ -56,14 +63,17 @@ def create_tracking_table():
     print("tracker table created successfully")
 
 
-def create_analytics_table():
+def create_power_mix_table():
     query = """
-    CREATE TABLE IF NOT EXISTS sites_daily_stats(
+    CREATE TABLE IF NOT EXISTS sites_power_mix(
         site_code VARCHAR(50) NOT NULL,
         date DATE NOT NULL,
-        avg_temperature_2m DOUBLE PRECISION,
-        avg_relative_humidity_2m DOUBLE PRECISION,
         avg_shortwave_radiation DOUBLE PRECISION,
+        avg_wind_speed_80m DOUBLE PRECISION,
+        sun_ok_hours INT,
+        wind_ok_hours INT,
+        DG_ok_hours INT,
+
         PRIMARY KEY (site_code, date)
 
     );"""
@@ -71,34 +81,25 @@ def create_analytics_table():
     with engine.begin() as conn:
         conn.execute(text(query))
 
-    print("sites_daily_stats table created successfully")
+    print("sites_power_mix table created successfully")
 
 
-def insert_daily_aggregate(aggregate_data):
-    if aggregate_data.empty:
-        return
-
+def create_danger_alerts_table():
     query = """
-    INSERT INTO sites_daily_stats(
-        site_code,
-        date,
-        avg_temperature_2m,
-        avg_relative_humidity_2m,
-        avg_shortwave_radiation
-    )
-    VALUES (
-        :site_code,
-        :date,
-        :temperature_2m,
-        :relative_humidity_2m,
-        :shortwave_radiation
-    )
-    ON CONFLICT (site_code, date)
-    DO NOTHING;
+    CREATE TABLE IF NOT EXISTS site_danger_alerts(
+        site_code VARCHAR(50) NOT NULL,
+        date TIMESTAMPTZ NOT NULL,
+        alert_type VARCHAR(50) NOT NULL,
+        value DOUBLE PRECISION NOT NULL,
+
+        PRIMARY KEY (site_code, date, alert_type)
+    );
     """
 
     with engine.begin() as conn:
-        conn.execute(text(query), aggregate_data.to_dict(orient="records"))
+        conn.execute(text(query))
+
+    print("site_danger_alerts table created successfully")
 
 
 def update_tracking_status(site_code, status):
@@ -142,14 +143,28 @@ def insert_weather_data(weather_data):
         date,
         temperature_2m,
         relative_humidity_2m,
-        shortwave_radiation
+        shortwave_radiation,
+        cloud_cover, 
+        wind_speed_10m, 
+        wind_speed_80m, 
+        wind_gusts_10m,
+        wind_direction_80m, 
+        precipitation, 
+        dew_point_2m
     )
     VALUES (
         :site_code,
         :date,
         :temperature_2m,
         :relative_humidity_2m,
-        :shortwave_radiation
+        :shortwave_radiation,
+        :cloud_cover, 
+        :wind_speed_10m, 
+        :wind_speed_80m, 
+        :wind_gusts_10m,
+        :wind_direction_80m, 
+        :precipitation, 
+        :dew_point_2m
     )
 
     ON CONFLICT (site_code, date)
@@ -160,6 +175,56 @@ def insert_weather_data(weather_data):
         conn.execute(text(query), weather_data)
 
 
-if __name__ == "__main__":
-    create_tracking_table()
-    create_weather_table()
+def insert_power_mix(aggregate_data):
+    if aggregate_data.empty:
+        return
+
+    query = """
+    INSERT INTO sites_power_mix(
+        site_code,
+        date,
+        avg_shortwave_radiation,
+        avg_wind_speed_80m,
+        sun_ok_hours,
+        wind_ok_hours,
+        DG_ok_hours
+    )
+    VALUES (
+        :site_code,
+        :date,
+        :shortwave_radiation,
+        :wind_speed_80m,
+        :sun_ok,
+        :wind_ok,
+        :DG_ok
+    )
+    ON CONFLICT (site_code, date)
+    DO NOTHING;
+    """
+
+    with engine.begin() as conn:
+        conn.execute(text(query), aggregate_data.to_dict(orient="records"))
+
+
+def insert_danger_alerts(alerts):
+    if alerts.empty:
+        return
+
+    query = """
+    INSERT INTO site_danger_alerts(
+        site_code,
+        date,
+        alert_type,
+        value
+    )
+    VALUES (
+        :site_code,
+        :date,
+        :alert_type,
+        :value
+    )
+    ON CONFLICT (site_code, date, alert_type)
+    DO NOTHING;
+    """
+    with engine.begin() as conn:
+        conn.execute(text(query), alerts.to_dict(orient="records"))

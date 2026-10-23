@@ -7,6 +7,19 @@ import time
 
 URL = "https://api.open-meteo.com/v1/forecast"
 
+HOURLY_VARIABLES = [
+    "temperature_2m",
+    "relative_humidity_2m",
+    "shortwave_radiation",
+    "cloud_cover",
+    "wind_speed_10m",
+    "wind_speed_80m",
+    "wind_gusts_10m",
+    "wind_direction_80m",
+    "precipitation",
+    "dew_point_2m",
+]
+
 
 # ----------------------------------------------------------------------
 # 1) Build request params for ONE site
@@ -18,8 +31,9 @@ def build_request_params(latitude, longitude):
     return {
         "latitude": latitude,
         "longitude": longitude,
-        "hourly": ["temperature_2m", "relative_humidity_2m", "shortwave_radiation"],
+        "hourly": HOURLY_VARIABLES,
         "timezone": "UTC",
+        "wind_speed_unit": "ms",  # we need data in m/s because standard of wind calculations is m/s
         "start_date": start_date,
         "end_date": end_date,
     }
